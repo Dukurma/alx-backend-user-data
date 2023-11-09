@@ -1,46 +1,68 @@
 #!/usr/bin/env python3
-"""Session authentication module for the API.
+""" Module of Expiration of Session Authentication
 """
-from uuid import uuid4
-from flask import request
-
-from .auth import Auth
+from api.v1.auth.session_auth import SessionAuth
+from datetime import datetime, timedelta
 from models.user import User
+from os import getenv
 
 
-class SessionAuth(Auth):
-    """Session authentication class.
-    """
-    user_id_by_session_id = {}
+class SessionExpAuth(SessionAuth):
+    """Session Expiration Class"""
 
-    def create_session(self, user_id: str = None) -> str:
-        """Creates a session id for the user.
-        """
-        if type(user_id) is str:
-            session_id = str(uuid4())
-            self.user_id_by_session_id[session_id] = user_id
-            return session_id
+    def __init__(self):
+        """Constructor Method"""
+        SESSION_DURATION = getenv('SESSION_DURATION')
 
-    def user_id_for_session_id(self, session_id: str = None) -> str:
-        """Retrieves the user id of the user associated with
-        a given session id.
-        """
-        if type(session_id) is str:
-            return self.user_id_by_session_id.get(session_id)
+        try:
+            session_duration = int(SESSION_DURATION)
+        except Exception:
+            session_duration = 0
 
-    def current_user(self, request=None) -> User:
-        """Retrieves the user associated with the request.
-        """
-        user_id = self.user_id_for_session_id(self.session_cookie(request))
-        return User.get(user_id)
+        self.session_duration = session_duration
 
-    def destroy_session(self, request=None):
-        """Destroys an authenticated session.
-        """
-        session_id = self.session_cookie(request)
-        user_id = self.user_id_for_session_id(session_id)
-        if (request is None or session_id is None) or user_id is None:
-            return False
-        if session_id in self.user_id_by_session_id:
-            del self.user_id_by_session_id[session_id]
-        return True
+    def create_session(self, user_id=None):
+        """Creation session with expiration"""
+
+        session_id = super().create_session(user_id)
+
+        if session_id is None:
+            return None
+
+        session_dictionary = {
+            "user_id": user_id,
+            "created_at": datetime.now()
+        }
+
+        self.user_id_by_session_id[session_id] = session_dictionary
+
+        return session_id
+
+    def user_id_for_session_id(self, session_id=None):
+        """gets user_id from session_id"""
+
+        if session_id is None:
+            return None
+
+        if session_id not in self.user_id_by_session_id.keys():
+            return None
+
+        session_dictionary = self.user_id_by_session_id.get(session_id)
+
+        if session_dictionary is None:
+            return None
+
+        if self.session_duration <= 0:
+            return session_dictionary.get('user_id')
+
+        created_at = session_dictionary.get('created_at')
+
+        if created_at is None:
+            return None
+
+        expired_time = created_at + timedelta(seconds=self.session_duration)
+
+        if expired_time < datetime.now():
+            return None
+
+        return session_dictionary.get('user_id')
